@@ -1,0 +1,55 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - symfony-deployment
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # required to access existing tags
+
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Get next tag
+        id: get_tag
+        run: |
+          latest=$(git tag --sort=-v:refname | head -n1)
+          echo "Latest tag: $latest"
+          if [[ -z "$latest" ]]; then
+            echo "tag=v1.0.0" >> $GITHUB_OUTPUT
+          else
+            version=${latest#v}
+            IFS='.' read -r major minor patch <<< "$version"
+            patch=$((patch + 1))
+            echo "tag=v$major.$minor.$patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create and push new tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.get_tag.outputs.tag }}
+          git push origin ${{ steps.get_tag.outputs.tag }}
+
+      - name: Build and push Docker image
+        run: |
+          IMAGE_TAG=${{ steps.get_tag.outputs.tag }}
+          docker build \
+            --build-arg APP_SECRET=${{ secrets.APP_SECRET }} \
+            -t bbeckerdarosa/symfony:${IMAGE_TAG} \
+            .
+          docker push bbeckerdarosa/symfony:${IMAGE_TAG}
